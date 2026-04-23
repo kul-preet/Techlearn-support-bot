@@ -26,8 +26,24 @@ client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 
 #-------------------SECTION 2: RAG (Read and Search knowledge)-----------------------
+def load_knowledge():
+    """ reads knowldege.txt file and splits into the chunks.
+        one paragraph = one chunk
+    """
+    if not (os.path.exists(KNOWLEDGE_FILE)):
+        print( f"Knowledge file '{KNOWLEDGE_FILE}' not found. RAG disabled.")
+        return []
+    
+    with open(KNOWLEDGE_FILE, "r") as f:
+        content = f.read()
+        chunks = []
+        for paragraph in content.split("\n\n"):
+            chunks.append(paragraph.strip())
+    return chunks
 
-
+def retrieve(question, chunks , top_k = 2):
+    
+    
 
 
 #-------------------SECTION 3: MEMORY (save and load memory)----------------------
