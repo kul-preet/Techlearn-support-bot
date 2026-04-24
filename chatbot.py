@@ -13,7 +13,7 @@ load_dotenv()
 MEMORY_FILE = "memory.json"
 KNOWLEDGE_FILE = "knowledge.txt"
 MODEL = "llama-3.3-70b-versatile"
-SYSTEM_PROMPT = "you are a helpful supprtive assistant for techlearn. Who help customers with the infromation,pricing,refunds and general queries use tools when you need real-time data like date/time, calculations, or web search. Use the provided context to answer the questions about the tech learn, and if you don't know anything, say no honestly"
+SYSTEM_PROMPT = "You are a helpful and friendly customer support assistant for TechLearn India.You help customers with course information, pricing, refunds, and general queries.You MUST use the get_datetime tool whenever asked about date or time. Never answer date/time from memory.Use tools when you need real-time data like date/time, calculations, or web search.Use the provided context to answer questions about TechLearn policies and courses.If you don't know something, say so honestly."
 
 
 #------------------initialize groq client-----------------------
@@ -42,8 +42,8 @@ def get_datetime():
 def web_search(query):
     """A placeholder for a web search tool. In real implementations, we will call an api here"""
     
-    query_lower = query.Lower()
-     if "techlearn" in query_lower:
+    query_lower = query.lower()
+    if "techlearn" in query_lower:
         return "Search results: TechLearn India is rated 4.5/5 on Google. Students praise the quality of content and affordable pricing. Most reviewed courses are ML and Data Science."
 
     elif "online course" in query_lower or "e-learning" in query_lower:
@@ -77,7 +77,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "get_datetime",
-            "description": "Get the current date and time. Use when user asks about today's date, time, or day.",
+            "description": "ALWAYS use this tool when user asks about current date, time, day, or year. You do not know the current date yourself so you MUST use this tool.",
             "parameters": {
                 "type": "object",
                 "properties": {}  # no arguments needed
@@ -211,19 +211,70 @@ def chat (history, user_input, chunks):
     response = client.chat.completions.create(
         model=MODEL,
         messages=history,
-        tools=tools,
+        tools=tools, 
         max_tokens=512,
         temperature=0.3,
         tool_choice = "auto",
     )
     response_message = response.choices[0].message
-    
+#     print(f"\n response tool call", response_message.tool_calls)
+#     response tool call 
+#       [
+    #       ChatCompletionMessageToolCall(id='yf2ncdy04', 
+    #       function=Function(arguments='null', name='get_datetime'),   
+    #       type='function')
+    #   ]
+    #       assistant: None
     #------------------tool handling logic will go here in future----------------------
+    if response_message.tool_calls:
+        print(f"\n using tool...", end="")
+        
+        history.append({
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": tool_call.id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_call.function.name,
+                        "arguments": tool_call.function.arguments
+                    }
+                }
+                for tool_call in response_message.tool_calls
+            ]
+        })
 
+        
+        for tool_call in response_message.tool_calls:
+            function_name = tool_call.function.name
+            raw = tool_call.function.arguments
+            arguments = json.loads(raw) if raw and raw.strip() != "null" else {}
             
-    
-    
-    reply = response_message.content
+            print(f"[{function_name}]")
+            actual_fn = available_functions[function_name]
+            result = actual_fn(**arguments)
+  
+            # print(f"Tool result: {result}")
+            
+            #add tools to history
+            history.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": function_name,
+                "content": str(result)
+            })
+            
+        #second LLM call - generate final answer using tool results
+        final_response = client.chat.completions.create(
+            model=MODEL,
+            messages=history,
+            max_tokens=512,
+            temperature=0.3,
+        )
+        reply = final_response.choices[0].message.content
+        
+    else:
+        reply = response_message.content
     
     history.append({"role": "assistant", "content": reply})
     
@@ -269,12 +320,14 @@ def main():
         
         if user_input.lower() == "history":
             print("\n--- Conversation History ---")
-           for msg in history:
+            for msg in history:
                 if msg["role"] == "system":
                     continue
+                
                 if isinstance(msg, dict) and "role" in msg:
                     role = "You" if msg["role"] == "user" else "Bot"
                     content = msg.get("content", "")
+                    
                     if content:
                         print(f"{role}: {str(content)[:80]}")
             print("--- End of History ---\n")
